@@ -1,0 +1,57 @@
+# Mimir 单体模式配置（用于本地演示）
+target: all
+
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  log_level: info
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data/mimir/data
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/mimir/blocks
+  tsdb:
+    dir: /data/mimir/tsdb
+  bucket_store:
+    sync_dir: /data/mimir/tsdb-sync
+
+compactor:
+  data_dir: /data/mimir/compactor
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+ingester:
+  ring:
+    replication_factor: 1
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ruler:
+  rule_path: /data/mimir/rules
+  alertmanager_url: http://127.0.0.1:8080/alertmanager
+  ring:
+    kvstore:
+      store: memberlist
+
+alertmanager:
+  data_dir: /data/mimir/alertmanager
+  fallback_config_file: /etc/alertmanager_fallback_config.yaml
+  external_url: http://localhost:9009/alertmanager
+
+activity_tracker:
+  filepath: /tmp/mimir-activity.log
+
+limits:
+  max_global_series_per_user: 1000000
+  ingestion_rate: 100000
+  ingestion_burst_size: 200000

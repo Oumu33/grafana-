@@ -1,0 +1,148 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 数据生成器（合成应用）
+  # ---------------------------------------------------------------------------
+  # app:
+  #   build: ./app
+  #   container_name: demo-app
+  #   restart: unless-stopped
+  #   environment:
+  #     - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+  #     - PYROSCOPE_SERVER_ADDRESS=http://pyroscope:4040
+  #   ports:
+  #     - "18080:8080"
+  #   networks:
+  #     - lgtmp-net
+  #   depends_on:
+  #     - alloy
+
+  # Spring Boot 应用（零代码侵入，自动实现 Traces → Profiles 关联）
+  # 使用多阶段构建，无需本地安装 Maven
+  java-app:
+    build:
+      context: ./SpringBootDemo
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    container_name: demo-java-app
+    restart: unless-stopped
+    environment:
+      # OpenTelemetry 配置（自动埋点 Traces/Metrics/Logs）
+      - OTEL_SERVICE_NAME=java-demo-app
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=java-demo-app,service.version=1.0.0,service_name=java-demo-app,job=java-demo-app
+      # Pyroscope OTel Extension 配置（自动关联 Traces 和 Profiles）
+      - OTEL_JAVAAGENT_EXTENSIONS=/app/pyroscope-otel.jar
+      - OTEL_PYROSCOPE_APPLICATION_NAME=java-demo-app
+      - OTEL_PYROSCOPE_SERVER_ADDRESS=http://pyroscope:4040
+      - OTEL_PYROSCOPE_START_PROFILING=true
+      # Pyroscope 原生环境变量（兼容性）
+      - PYROSCOPE_APPLICATION_NAME=java-demo-app
+      - PYROSCOPE_SERVER_ADDRESS=http://pyroscope:4040
+    ports:
+      - "18081:8080"
+    networks:
+      - lgtmp-net
+    depends_on:
+      - alloy
+      - pyroscope
+
+  # ---------------------------------------------------------------------------
+  # 采集层
+  # ---------------------------------------------------------------------------
+  alloy:
+    image: grafana/alloy:latest
+    container_name: demo-alloy
+    restart: unless-stopped
+    volumes:
+      - ./agent/config.alloy:/etc/alloy/config.alloy
+    command: 
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+      - "4317:4317" # OTLP gRPC 端口
+      - "4318:4318" # OTLP HTTP 端口
+    networks:
+      - lgtmp-net
+
+  # ---------------------------------------------------------------------------
+  # 存储后端
+  # ---------------------------------------------------------------------------
+  
+  # 1. Loki（日志）
+  loki:
+    image: grafana/loki:latest
+    container_name: demo-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./configs/loki.yaml:/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    networks:
+      - lgtmp-net
+
+  # 2. Mimir（指标）
+  mimir:
+    image: grafana/mimir:latest
+    container_name: demo-mimir
+    user: root
+    command: -config.file=/etc/mimir.yaml
+    volumes:
+      - ./configs/mimir.yaml:/etc/mimir.yaml
+    ports:
+      - "9009:9009"
+    networks:
+      - lgtmp-net
+
+  # 3. Tempo（链路追踪）
+  tempo:
+    image: grafana/tempo:latest
+    container_name: demo-tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./configs/tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "3200:3200" # HTTP API（包含 /otlp 端点的 OTLP 服务）
+    networks:
+      - lgtmp-net
+
+  # 4. Pyroscope（性能分析）
+  pyroscope:
+    image: grafana/pyroscope:latest
+    container_name: demo-pyroscope
+    command: [ "server" ]
+    volumes:
+      - ./configs/pyroscope.yaml:/etc/pyroscope/server.yaml
+    ports:
+      - "4040:4040"
+    networks:
+      - lgtmp-net
+
+  # ---------------------------------------------------------------------------
+  # 可视化层
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:12.0.0
+    container_name: demo-grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor traceqlStreaming metricsGenerator visualizationGrouping
+    volumes:
+      - ./configs/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    ports:
+      - "3000:3000"
+    networks:
+      - lgtmp-net
+    depends_on:
+      - loki
+      - mimir
+      - tempo
+      - pyroscope
+
+networks:
+  lgtmp-net:
+    driver: bridge

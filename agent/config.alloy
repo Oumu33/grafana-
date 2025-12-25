@@ -1,0 +1,59 @@
+// OTLP 接收器：接收来自应用的 Logs、Metrics、Traces
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+// 批处理处理器
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.prometheus.mimir.input]
+    logs    = [otelcol.exporter.loki.default.input]
+    traces  = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+// 导出器：Mimir（Prometheus 兼容）
+otelcol.exporter.prometheus "mimir" {
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+// 导出器：Loki
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// 导出器：Tempo（OTLP HTTP）
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    endpoint = "http://tempo:4320"
+  }
+}
+
+// Pyroscope 处理说明：
+// 当前 demo 中，应用直接通过 Pyroscope SDK 推送到 Pyroscope 容器（http://pyroscope:4040），
+// 不经过 Alloy。这样简化配置，避免 Alloy 的 profiling 组件语法变化带来的兼容性问题。
+
+

@@ -1,0 +1,81 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: Loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    jsonData:
+      derivedFields:
+        # [Logs -> Traces] 配置: 从日志内容中提取 traceid 并显示跳转 Tempo 的按钮
+        - datasourceUid: Tempo
+          matcherRegex: '"traceid":\s*"(\w+)"'
+          name: TraceID
+          url: '$${__value.raw}'
+
+  - name: Mimir
+    type: prometheus
+    uid: Mimir
+    access: proxy
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    version: 1
+    jsonData:
+      timeInterval: "15s"
+
+  - name: Tempo
+    type: tempo
+    uid: Tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    version: 1
+    jsonData:
+      tracesToLogsV2:
+        # [Traces -> Logs] 配置: 在 Trace 视图中跳转到 Loki 查看相关日志
+        datasourceUid: 'Loki'
+        spanStartTimeShift: '-1h' # 向前回溯 1 小时，防止时钟偏差导致找不到日志
+        spanEndTimeShift: '1h'    # 向后延展 1 小时
+        tags: ['job']
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{job="$${__span.tags.job}"} |= "$${__span.traceId}"'
+
+      tracesToMetrics:
+        # [Traces -> Metrics] 配置: 跳转到 Mimir 查看该 Span 相关的 RED 指标
+        datasourceUid: 'Mimir'
+        spanStartTimeShift: '1h'
+        spanEndTimeShift: '1h'
+        tags: [{ key: 'service.name', value: 'service' }, { key: 'job' }]
+        queries:
+          - name: 'Sample'
+            query: 'sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[$$__rate_interval]))'
+
+      serviceMap:
+        datasourceUid: 'Mimir'
+      nodeGraph:
+        enabled: true
+      lokiSearch:
+        datasourceUid: 'Loki'
+      tracesToProfiles:
+        # [Traces -> Profiles] 配置: 跳转到 Pyroscope 查看性能火焰图
+        datasourceUid: 'Pyroscope'
+        profileTypeId: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds'
+        # 简化版：根据 service_name 跳转到对应服务的总体火焰图
+        # 这里只把 service_name 暴露成 Pyroscope 查询的 tag，避免 pyroscope.profile.id 参与匹配
+        tags: ['service_name']
+        customQuery: true
+        # ${__tags} 会被展开为 service_name="demo-app" 这样的 label 选择器
+        query: '{service_name="$${__span.tags.job}"}'
+
+  - name: Pyroscope
+    type: grafana-pyroscope-datasource
+    uid: Pyroscope
+    access: proxy
+    url: http://pyroscope:4040
+    isDefault: false
+    jsonData:
+      minStep: "15s"

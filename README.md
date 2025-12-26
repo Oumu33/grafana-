@@ -1,12 +1,12 @@
 ## LGTMP 栈演示环境（Loki + Grafana + Tempo + Mimir + Pyroscope）
 
-这个项目是一个完整的可观测性演示环境，基于 Grafana 的 **LGTM + Pyroscope** 技术栈，并配套一个用 Go 编写的“合成压测应用”，持续产生日志、链路、指标和性能分析（Profiles），方便在本地演示 **Logs → Traces → Metrics → Profiles** 的联动能力。
+这个项目是一个完整的可观测性演示环境，基于 Grafana 的 **LGTM + Pyroscope** 技术栈，并配套一个用 Go 编写的"合成压测应用"，持续产生日志、链路、指标和性能分析（Profiles），方便在本地演示 **Logs → Traces → Metrics → Profiles** 的联动能力。
 
 ### Java 应用接入（一句话总结）
 
 **服务端已搭建完成，Java 应用只需：下载两个 JAR 包，启动时添加一个 `-javaagent` 参数，配置环境变量指向服务端即可。零代码侵入，自动实现 Traces → Profiles 关联。**
 
-详细接入流程见下方“Java 应用接入”章节。
+详细接入流程见下方"Java 应用接入"章节。
 
 ### 组件一览
 
@@ -19,12 +19,27 @@
 
 ### 快速开始
 
+#### ARM64 架构（Mac M1/M2/M3）
+
 1. 启动整套环境：
 
    ```bash
-   cd lgtmp-demo
+   cd lgtmp-grafana-main
    docker-compose up -d --build
    ```
+
+#### x86_64 架构（Linux/Windows/Intel Mac）
+
+1. 启动整套环境：
+
+   ```bash
+   cd lgtmp-grafana-main
+   docker-compose -f docker-compose-x86.yaml up -d --build
+   ```
+
+   **注意**：首次build可能需要5-10分钟（下载依赖、编译应用）
+
+#### 通用步骤
 
 2. 打开 Grafana：
 
@@ -42,7 +57,11 @@
 4. 停止环境：
 
    ```bash
+   # ARM64
    docker-compose down
+
+   # x86_64
+   docker-compose -f docker-compose-x86.yaml down
    ```
 
 ### 架构概览
@@ -56,7 +75,74 @@
 - **Tempo**：
   - 启用 `metrics_generator`，从 Trace 生成 Span Metrics / Service Graph，写入 Mimir。
 - **Grafana**：
-  - 通过 `configs/grafana-datasources.yaml` 预配置 Loki / Tempo / Mimir / Pyroscope 数据源及各种“Trace ↔ Logs / Metrics / Profiles / Node Graph”的跳转规则。
+  - 通过 `configs/grafana-datasources.yaml` 预配置 Loki / Tempo / Mimir / Pyroscope 数据源及各种"Trace ↔ Logs / Metrics / Profiles / Node Graph"的跳转规则。
+
+---
+
+## 代码侵入性对比：Java vs Go
+
+本项目同时提供了 **Java** 和 **Go** 两种 Demo 应用，展示了不同的可观测性接入方式：
+
+### Java 应用 - 零代码侵入 ✅
+
+**特点**：使用 OpenTelemetry Java Agent 自动埋点，**无需修改任何源码**
+
+**接入方式**：
+```bash
+java -javaagent:/path/to/opentelemetry-javaagent.jar \
+     -Dotel.javaagent.extensions=/path/to/pyroscope-otel.jar \
+     -jar your-app.jar
+```
+
+**优势**：
+- ✅ 零代码侵入，现有应用无需修改
+- ✅ 自动埋点（HTTP、数据库、框架等）
+- ✅ 通过环境变量配置，灵活切换
+- ✅ 自动关联 Traces → Profiles（通过 Pyroscope OTel Extension）
+
+**实现原理**：
+- OpenTelemetry Java Agent 在 JVM 启动时使用字节码增强技术
+- 自动为 Spring Boot、Servlet、JDBC 等框架注入追踪代码
+- Pyroscope Extension 在 span 上添加 `pyroscope.profile.id` 实现关联
+
+### Go 应用 - SDK 集成（有侵入）📝
+
+**特点**：需要在代码中集成 OpenTelemetry Go SDK
+
+**接入方式**：
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "github.com/grafana/pyroscope-go"
+    "github.com/grafana/otel-profiling-go"
+)
+
+// 初始化 tracer, meter, logger
+tracer := otel.Tracer("demo-app")
+
+// 手动创建 span
+ctx, span := tracer.Start(ctx, "operation_name")
+defer span.End()
+```
+
+**优势**：
+- ✅ 更细粒度的控制（自定义 span、attributes）
+- ✅ 更好的性能（按需埋点）
+- ✅ 适合复杂业务场景
+
+**劣势**：
+- ❌ 需要修改源码
+- ❌ 需要开发人员理解 OpenTelemetry 概念
+- ❌ 代码维护成本较高
+
+### 选择建议
+
+| 场景 | 推荐方案 | 原因 |
+|------|----------|------|
+| Java 应用快速接入 | **Java Agent** | 零代码侵入，环境变量配置即可 |
+| Go 微服务新项目 | **Go SDK** | 从设计阶段就集成可观测性 |
+| 遗留系统改造 | **Java Agent** | 最小化改动，快速获得可观测性 |
+| 精细化追踪需求 | **Go SDK** | 自定义业务 span 和 attributes |
 
 ---
 
@@ -75,11 +161,11 @@
 处理函数：`helloHandler`
 
 - 逻辑：只做极少量工作，返回 `"Hello World"`。
-- 作用：作为基线，对比“正常延迟 / 正常 CPU” 的样子。
+- 作用：作为基线，对比"正常延迟 / 正常 CPU" 的样子。
 - 在 Grafana 中：
   - **Trace**：span 持续时间非常短。
   - **Logs**：`route="/hello"`，`duration_ms` 很小。
-  - **Profiles**：对 `/hello` 对应 span 点 “Profiles for this span”，几乎看不到明显的 CPU 热点。
+  - **Profiles**：对 `/hello` 对应 span 点 "Profiles for this span"，几乎看不到明显的 CPU 热点。
 
 ### `/slow` —— 正则校验导致的 CPU 高占用（`checkEmail`）
 
@@ -87,7 +173,7 @@
 
 - 逻辑：
   - 在 `slow_business_logic` span 中，多次调用 `checkEmail`。
-  - `checkEmail` 使用了一条复杂的邮箱正则，对一段刻意构造的“坏邮箱字符串”做高频匹配：
+  - `checkEmail` 使用了一条复杂的邮箱正则，对一段刻意构造的"坏邮箱字符串"做高频匹配：
 
     ```go
     // 模拟写得不合理的邮箱正则校验，通过大量重复正则匹配制造 CPU 压力
@@ -111,16 +197,16 @@
   curl http://localhost:8080/slow
   ```
 
-  实际上，应用内部自带的“流量发生器”也会持续请求 `/slow`，不手动调也会有数据。
+  实际上，应用内部自带的"流量发生器"也会持续请求 `/slow`，不手动调也会有数据。
 
 - 如何在图里看到异常：
-  - **Logs（Loki）**：搜索 `route=/slow`，可以看到形如  
+  - **Logs（Loki）**：搜索 `route=/slow`，可以看到形如
     `[OK] route=/slow method=GET status=200 duration_ms=... trace_id=... span_id=...` 的日志。
   - **Traces（Tempo）**：打开任意一条 Trace，找到 `slow_business_logic` span。
-  - **Traces → Profiles（Tempo → Pyroscope）**：  
-    点击火焰图按钮，能看到一条非常“笔直”的栈：  
-    `… → main.slowHandler → main.checkEmail → regexp.(*Regexp).MatchString / doMatch / backtrack ...`，  
-    很容易向团队解释“是某个正则写得太复杂 / 输入太极端，把 CPU 烧满了”。
+  - **Traces → Profiles（Tempo → Pyroscope）**：
+    点击火焰图按钮，能看到一条非常"笔直"的栈：
+    `… → main.slowHandler → main.checkEmail → regexp.(*Regexp).MatchString / doMatch / backtrack ...`，
+    很容易向团队解释"是某个正则写得太复杂 / 输入太极端，把 CPU 烧满了"。
 
 ### `/alloc` —— 模拟内存占用 / 泄漏倾向
 
@@ -152,21 +238,21 @@
 - 触发方式：
 
   ```bash
-  # 多打几次，模拟“一个接口每次请求都偷偷吃一大块内存”
+  # 多打几次，模拟"一个接口每次请求都偷偷吃一大块内存"
   for i in {1..20}; do curl -s http://localhost:8080/alloc > /dev/null; done
   ```
 
 - 如何在图里看到异常：
   - **Metrics / 进程监控**：`demo-app` 的内存占用（RSS）会阶梯式上升，然后在 `maxRetained` 附近趋于平稳。
-  - **Traces（Tempo）**：`alloc_business_logic` span 会比普通请求明显更“肥”（耗时更长）。
-  - **Profiles（Pyroscope）**：对该 span 点 “Profiles for this span”，可以看到热点集中在  
+  - **Traces（Tempo）**：`alloc_business_logic` span 会比普通请求明显更"肥"（耗时更长）。
+  - **Profiles（Pyroscope）**：对该 span 点 "Profiles for this span"，可以看到热点集中在
     `make([]byte)` / `runtime.mallocgc` / `memmove` 等内存分配相关函数上。
 
 结合 `/hello`、`/slow`、`/alloc` 三个案例，你可以在一次演示中向团队展示：
 
 1. **正常请求**：链路短、CPU 和内存都很轻；
 2. **CPU 异常**：通过 Trace + Flamegraph 一眼看出是 `checkEmail` 这样的业务逻辑在烧 CPU；
-3. **内存异常**：通过 Trace + Profile + Metrics 看出是哪个接口在“悄悄吃内存”，并找到具体代码位置（`allocateMemoryBurst` 一类函数）。
+3. **内存异常**：通过 Trace + Profile + Metrics 看出是哪个接口在"悄悄吃内存"，并找到具体代码位置（`allocateMemoryBurst` 一类函数）。
 
 ---
 
@@ -264,7 +350,7 @@ java-app:
 2. **在 Grafana 中验证**：
    - **Tempo**：查看 `service.name=java-demo-app` 的 Traces
    - **Pyroscope**：查看 `java-demo-app` 的火焰图
-   - **Traces → Profiles**：在 Tempo 的 span 详情中点击“Profiles for this span”，应该能看到对应的火焰图
+   - **Traces → Profiles**：在 Tempo 的 span 详情中点击"Profiles for this span"，应该能看到对应的火焰图
 
 ---
 
@@ -287,7 +373,7 @@ java-app:
      ↓ -javaagent:opentelemetry-javaagent.jar
    OpenTelemetry Agent（自动埋点）
      ↓ OTLP/HTTP → Alloy → Tempo/Loki/Mimir
-   
+
    Pyroscope Extension（通过环境变量加载）
      ↓ 带 pyroscope.profile.id 的 Profile → Pyroscope
    ```
@@ -296,10 +382,10 @@ java-app:
 
 ### 总结
 
-✅ **服务端已搭建完成**：LGTMP 栈无需任何改造  
+✅ **服务端已搭建完成**：LGTMP 栈无需任何改造
 ✅ **Java 应用只需**：
    - 下载两个 JAR 包
    - 启动时添加一个 `-javaagent` 参数
    - 配置环境变量指向服务端
-✅ **零代码侵入**：无需修改 Java 应用代码  
+✅ **零代码侵入**：无需修改 Java 应用代码
 ✅ **自动关联**：Traces → Profiles 跳转与 Go 应用效果完全一致

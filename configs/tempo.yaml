@@ -1,5 +1,6 @@
 server:
-  http_listen_port: 3200
+  http_listen_port: 3200  # HTTP API 端口（用于查询和OTLP接收）
+  grpc_listen_port: 9096  # gRPC API 端口（用于Grafana查询服务）
 
 distributor:
   receivers:

@@ -33,6 +33,7 @@ datasources:
     isDefault: false
     version: 1
     jsonData:
+      httpMethod: GET
       tracesToLogsV2:
         # [Traces -> Logs] 配置: 在 Trace 视图中跳转到 Loki 查看相关日志
         datasourceUid: 'Loki'

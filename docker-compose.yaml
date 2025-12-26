@@ -22,7 +22,6 @@ services:
     build:
       context: ./SpringBootDemo
       dockerfile: Dockerfile
-    platform: linux/arm64
     container_name: demo-java-app
     restart: unless-stopped
     environment:
@@ -133,6 +132,7 @@ services:
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor traceqlStreaming metricsGenerator visualizationGrouping
     volumes:
       - ./configs/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./configs/dashboards:/etc/grafana/provisioning/dashboards
     ports:
       - "3000:3000"
     networks:

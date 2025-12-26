@@ -160,9 +160,9 @@ opentelemetry-instrument python app.py
 
 | 语言 | 代码侵入 | 接入方式 | 自动埋点 | 适用场景 |
 |------|----------|----------|----------|----------|
-| **Java** | ❌ 零侵入 | -javaagent | ✅ | Spring Boot、企业应用 |
-| **Python** | ❌ 零侵入 | opentelemetry-instrument | ✅ | Flask、Django、FastAPI |
-| **Go** | ✅ 需侵入 | SDK集成 | ❌ | 微服务、高性能应用 |
+| **Java** | ✅ 零侵入 | -javaagent | ✅ | Spring Boot、企业应用 |
+| **Python** | ✅ 零侵入 | opentelemetry-instrument | ✅ | Flask、Django、FastAPI |
+| **Go** | ❌ 需侵入 | SDK集成 | ❌ | 微服务、高性能应用 |
 
 ---
 

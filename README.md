@@ -79,9 +79,9 @@
 
 ---
 
-## 代码侵入性对比：Java vs Go
+## 代码侵入性对比：Java vs Go vs Python
 
-本项目同时提供了 **Java** 和 **Go** 两种 Demo 应用，展示了不同的可观测性接入方式：
+本项目提供了 **Java**、**Go** 和 **Python** 三种应用的可观测性接入演示，展示了不同语言的接入方式：
 
 ### Java 应用 - 零代码侵入 ✅
 
@@ -135,14 +135,200 @@ defer span.End()
 - ❌ 需要开发人员理解 OpenTelemetry 概念
 - ❌ 代码维护成本较高
 
-### 选择建议
+### Python 应用 - 零代码侵入 ✅
 
-| 场景 | 推荐方案 | 原因 |
-|------|----------|------|
-| Java 应用快速接入 | **Java Agent** | 零代码侵入，环境变量配置即可 |
-| Go 微服务新项目 | **Go SDK** | 从设计阶段就集成可观测性 |
-| 遗留系统改造 | **Java Agent** | 最小化改动，快速获得可观测性 |
-| 精细化追踪需求 | **Go SDK** | 自定义业务 span 和 attributes |
+**特点**：使用 OpenTelemetry Python 自动埋点，**无需修改任何源码**
+
+**接入方式**：
+```bash
+# 使用 opentelemetry-instrument 命令启动应用
+opentelemetry-instrument python app.py
+```
+
+**优势**：
+- ✅ 零代码侵入，现有应用无需修改
+- ✅ 自动埋点（Flask、Django、FastAPI、requests等）
+- ✅ 通过环境变量配置，灵活切换
+- ✅ 支持多种Python框架和库
+
+**实现原理**：
+- OpenTelemetry Python 使用 monkey patching 技术
+- 自动为Flask、Django、FastAPI等框架注入追踪代码
+- 自动拦截HTTP请求、数据库调用等
+
+### 对比总结
+
+| 语言 | 代码侵入 | 接入方式 | 自动埋点 | 适用场景 |
+|------|----------|----------|----------|----------|
+| **Java** | ❌ 零侵入 | -javaagent | ✅ | Spring Boot、企业应用 |
+| **Python** | ❌ 零侵入 | opentelemetry-instrument | ✅ | Flask、Django、FastAPI |
+| **Go** | ✅ 需侵入 | SDK集成 | ❌ | 微服务、高性能应用 |
+
+---
+
+## Grafana 使用指南 - 如何查看可观测性数据
+
+本项目已预配置好所有数据源，并实现了 **Logs → Traces → Metrics → Profiles** 的全链路关联。以下是详细的使用方法：
+
+### 1️⃣ 查看日志（Loki）
+
+**步骤**：
+1. 打开 Grafana：`http://localhost:3000`
+2. 点击左侧菜单 **Explore**（探索图标）
+3. 顶部选择数据源：**Loki**
+4. 在查询框输入：`{job="demo-app"}`
+5. 点击 **Run query** 运行查询
+
+**你会看到**：
+- 应用的所有日志流
+- 每条日志包含：时间戳、日志内容、trace_id、span_id
+- 日志格式示例：
+  ```
+  [OK] route=/slow method=GET status=200 duration_ms=7262
+  trace_id=e72aed33e504dd9f82d890f64dee516a span_id=b8f5e8166150350c
+  ```
+
+**高级功能**：
+- **过滤日志**：`{job="demo-app"} |= "error"` （只看包含error的日志）
+- **JSON解析**：`{job="demo-app"} | json | route="/slow"` （解析JSON字段）
+- **跳转到Trace**：点击日志右侧的 **Tempo** 按钮，直接跳转到对应的追踪详情
+
+### 2️⃣ 查看追踪（Tempo）
+
+**步骤**：
+1. 在 Grafana Explore 中，选择数据源：**Tempo**
+2. 有三种查询方式：
+
+**方式A：通过TraceQL搜索**
+```
+{ service.name="demo-app" }
+```
+
+**方式B：通过Service选择**
+- 点击 **Search** 标签
+- Service Name 选择：`demo-app`
+- 点击 **Run query**
+
+**方式C：从日志跳转**
+- 在Loki日志中，点击日志右侧的 **Tempo** 按钮
+- 自动跳转到对应的trace
+
+**你会看到**：
+- Trace列表：每个HTTP请求的完整调用链路
+- 点击任意trace，查看详细的瀑布图（Waterfall）
+- Span详情：每个操作的耗时、状态、标签
+
+**Trace详情页功能**：
+- **Span详情**：点击任意span查看详细信息
+- **跳转到Logs**：点击span右侧的 **📄 文档图标** → 查看该span对应的日志
+- **跳转到Profiles**：点击span右侧的 **🔥 火焰图图标** → 查看CPU/内存分析
+- **Node Graph**：点击 **Node Graph** 标签 → 查看服务调用关系图
+
+### 3️⃣ 查看指标（Mimir/Prometheus）
+
+**步骤**：
+1. 在 Grafana Explore 中，选择数据源：**Mimir**
+2. 点击 **Metrics browser** 选择指标，或直接输入PromQL
+
+**常用查询示例**：
+
+```promql
+# 查询请求速率（QPS）
+rate(http_server_request_duration_seconds_count{job="demo-app"}[5m])
+
+# 查询请求延迟（P95）
+histogram_quantile(0.95, rate(http_server_request_duration_seconds_bucket{job="demo-app"}[5m]))
+
+# 查询错误率
+rate(http_server_request_duration_seconds_count{job="demo-app",status=~"5.."}[5m])
+```
+
+**你会看到**：
+- 时序图表：指标随时间变化的趋势
+- 可切换图表类型：线图、柱状图、表格等
+
+**从Traces跳转到Metrics**：
+- 在Tempo的span详情中，点击 **Metrics** 链接
+- 自动跳转到该span相关的RED指标（Rate、Error、Duration）
+
+### 4️⃣ 查看性能分析（Pyroscope）
+
+**步骤**：
+1. 在 Grafana Explore 中，选择数据源：**Pyroscope**
+2. 选择应用：`demo-app`
+3. 选择Profile类型：
+   - **CPU**：查看CPU热点
+   - **Alloc Space**：查看内存分配
+   - **Inuse Space**：查看内存占用
+
+**你会看到**：
+- **火焰图（Flamegraph）**：可视化展示函数调用栈和耗时占比
+- **热点函数**：火焰图中越宽的部分，表示该函数占用资源越多
+- **调用路径**：从下往上是函数调用链
+
+**火焰图阅读技巧**：
+- **宽度**：函数占用资源的比例（越宽=越热）
+- **高度**：调用栈的深度
+- **颜色**：无特殊含义，仅用于区分不同函数
+- **交互**：
+  - 点击函数块：放大该函数的子调用
+  - 双击空白：重置视图
+  - 鼠标悬停：查看函数详细信息
+
+**从Traces跳转到Profiles**：
+- 在Tempo的span详情中，点击 **🔥 火焰图图标**
+- 自动定位到该span执行期间的性能分析数据
+- **这是最强大的功能**：精确定位某个请求慢在哪个函数上！
+
+### 5️⃣ 全链路追踪演示案例
+
+#### 案例：排查 `/slow` 接口慢的原因
+
+**步骤1：从日志发现问题**
+1. Explore → Loki
+2. 查询：`{job="demo-app"} | json | route="/slow"`
+3. 发现该接口耗时 6000-8000ms
+
+**步骤2：查看追踪详情**
+1. 点击日志右侧的 **Tempo** 按钮
+2. 进入Trace详情页
+3. 看到 `slow_business_logic` span 占用了大部分时间
+
+**步骤3：查看性能分析定位代码**
+1. 点击 `slow_business_logic` span
+2. 点击右侧的 **🔥 火焰图图标**
+3. 跳转到Pyroscope
+4. 火焰图显示：`checkEmail` 函数占用99% CPU
+5. 继续展开：`regexp.MatchString` 是热点
+6. **结论**：正则表达式性能问题！
+
+**步骤4：验证修复效果**
+1. 修复代码后重新部署
+2. 在Mimir中对比修复前后的P95延迟
+3. 在Pyroscope中确认CPU热点消失
+
+### 6️⃣ 常见问题排查
+
+| 问题 | 排查工具 | 查询方式 |
+|------|----------|----------|
+| 接口慢 | Tempo + Pyroscope | Trace瀑布图 + 火焰图 |
+| 接口报错 | Loki + Tempo | 日志搜索 + Trace详情 |
+| 内存泄漏 | Pyroscope | Alloc Space火焰图 |
+| CPU高 | Pyroscope | CPU火焰图 |
+| 服务依赖 | Tempo | Node Graph / Service Graph |
+| 接口超时 | Tempo + Mimir | Trace + P99延迟指标 |
+
+### 7️⃣ 快捷键和技巧
+
+**Grafana通用快捷键**：
+- `Ctrl/Cmd + K`：打开命令面板
+- `Ctrl/Cmd + O`：跳转到Dashboard
+- `Esc`：关闭模态窗口
+
+**Explore页面技巧**：
+- **Split视图**：点击右上角 **Split** 按钮，并排对比两个数据源
+- **查询历史**：点击查询框下方的 **History** 查看历史查询
+- **共享查询**：点击右上角 **Share** 生成链接分享给团队
 
 ---
 

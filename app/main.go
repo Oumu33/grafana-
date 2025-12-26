@@ -306,10 +306,7 @@ func startTrafficGenerator(ctx context.Context) {
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	span := step(ctx, "processing_request")
-	defer span.End()
-
+	// 业务逻辑（otelhttp 中间件已自动创建顶层 span 和 metrics）
 	time.Sleep(time.Millisecond * time.Duration(rand.Intn(50)))
 
 	// Randomly fail

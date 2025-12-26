@@ -81,7 +81,11 @@
 
 ## 代码侵入性对比：Java vs Python vs Go
 
-本项目提供了 **Java**、**Python** 和 **Go** 三种应用的可观测性接入演示，展示了不同语言的接入方式：
+本项目提供了 **Java**、**Python** 和 **Go** 三种应用的可观测性接入演示，展示了不同语言实现 **Traces + Logs + Metrics** 的侵入性差异：
+
+- **Java**：完全零代码侵入（JavaAgent 自动生成所有信号）
+- **Python**：Traces/Logs 零侵入，Metrics 轻微侵入（约 30 行集中代码，业务代码无需修改）
+- **Go**：完全侵入（每个 handler 都要手动埋点）
 
 ### Java 应用 - 零代码侵入 ✅
 
@@ -105,9 +109,9 @@ java -javaagent:/path/to/opentelemetry-javaagent.jar \
 - 自动为 Spring Boot、Servlet、JDBC 等框架注入追踪代码
 - Pyroscope Extension 在 span 上添加 `pyroscope.profile.id` 实现关联
 
-### Python 应用 - 零代码侵入 ✅
+### Python 应用 - 轻微侵入（Traces/Logs 零侵入，Metrics 需 30 行代码）✅
 
-**特点**：使用 OpenTelemetry Python 自动埋点，**无需修改任何源码**
+**特点**：使用 OpenTelemetry Python 自动埋点，Traces 和 Logs 零侵入，Metrics 通过 Flask 钩子实现
 
 **接入方式**：
 ```bash
@@ -116,29 +120,44 @@ opentelemetry-instrument python app.py
 ```
 
 **优势**：
-- ✅ 零代码侵入，现有应用无需修改
+- ✅ Traces/Logs 零代码侵入，现有应用无需修改
+- ✅ Metrics 轻微侵入（约 30 行集中代码，业务代码无需修改）
 - ✅ 自动埋点（Flask、Django、FastAPI、requests等）
 - ✅ 通过环境变量配置，灵活切换
 - ✅ 支持多种Python框架和库
+- ✅ 新增接口自动获得 Metrics，无需额外埋点
 
 **实现原理**：
-- OpenTelemetry Python 使用 monkey patching 技术
+- **Traces/Logs**：OpenTelemetry Python 使用 monkey patching 技术自动埋点
 - 自动为Flask、Django、FastAPI等框架注入追踪代码
 - 自动拦截HTTP请求、数据库调用等
+- **Metrics**：使用 Flask 钩子（`before_request`/`after_request`）自动记录所有 HTTP 请求
+- 集中初始化 OpenTelemetry Metrics SDK，复用自动配置的 MeterProvider
+- 业务代码无需任何修改，新增接口自动获得指标
 
 **Demo 应用**：
 - 本项目提供了 Python Flask 演示应用（`PythonDemo/`）
 - 提供三个测试接口：`/hello`（正常）、`/slow`（CPU密集）、`/alloc`（内存密集）
-- 使用 `opentelemetry-instrument` 零代码启动，完全无需修改源码
+- 使用 `opentelemetry-instrument` 零代码启动，Traces 和 Logs 完全无需修改源码
 - 访问地址：`http://localhost:18082`（x86_64）
 
-**限制说明**：
-- ⚠️ **Metrics 自动上报限制**：Python 的 `opentelemetry-instrument` 自动埋点主要聚焦于 **Traces 和 Logs**，不会自动生成 HTTP 服务端指标（如请求速率、延迟等）
+**Metrics 实现说明**：
+- ✅ **已支持 HTTP Metrics 上报**：通过轻微代码侵入（约 30 行集中代码）实现
+- 实现方式：
+  - 使用 Flask `before_request`/`after_request` 钩子自动拦截所有 HTTP 请求
+  - 业务代码（`/hello`、`/slow`、`/alloc`、`/health`）**完全无需修改**
+  - 新增接口自动获得指标，无需额外埋点
+- 指标类型：
+  - `http_server_duration_milliseconds`：HTTP 请求耗时直方图
+  - `http_server_request_count`：HTTP 请求计数器
+  - 标签：`http.method`、`http.route`、`http.status_code`、`job`
+- 侵入性对比：
+  - **Go 方式**：每个 handler 都要埋点（N 个接口 × 10+ 行代码）
+  - **Python 方式**：集中初始化，业务代码零修改（1 个文件 × 30 行代码）
 - Python 应用当前支持：
-  - ✅ Traces → Tempo（完全支持）
-  - ✅ Logs → Loki（完全支持）
-  - ❌ Metrics → Mimir（不支持自动生成 HTTP 指标）
-- 如需 Metrics 支持，需要手动添加代码（这会破坏"零代码侵入"的优势），或使用其他语言（Java/Go 支持自动 Metrics）
+  - ✅ Traces → Tempo（零代码侵入）
+  - ✅ Logs → Loki（零代码侵入）
+  - ✅ Metrics → Mimir（轻微侵入，业务代码无需修改）
 
 ### Go 应用 - SDK 集成（有侵入）📝
 
@@ -175,8 +194,13 @@ defer span.End()
 | 语言 | 代码侵入 | 接入方式 | 自动 Traces | 自动 Logs | 自动 Metrics | 适用场景 |
 |------|----------|----------|------------|-----------|--------------|----------|
 | **Java** | ✅ 零侵入 | -javaagent | ✅ | ✅ | ✅ | Spring Boot、企业应用 |
-| **Python** | ✅ 零侵入 | opentelemetry-instrument | ✅ | ✅ | ❌ | Flask、Django、FastAPI |
+| **Python** | ⚠️ 轻微侵入 | opentelemetry-instrument + Flask钩子 | ✅ | ✅ | ✅ 需30行代码 | Flask、Django、FastAPI |
 | **Go** | ❌ 需侵入 | SDK集成 | ✅ 手动 | ✅ 手动 | ✅ 手动 | 微服务、高性能应用 |
+
+**注**：
+- **Java**：完全零代码侵入，JavaAgent 自动生成所有信号
+- **Python**：Traces/Logs 零侵入，Metrics 需约 30 行集中代码（业务代码无需修改）
+- **Go**：所有信号都需要在每个 handler 中手动埋点
 
 ---
 
